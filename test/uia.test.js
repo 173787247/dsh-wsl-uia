@@ -122,8 +122,8 @@ describe("parameters", () => {
   it("declares no additional properties", () => {
     assert.equal(parameters().additionalProperties, false);
   });
-  it("lists the three actions", () => {
-    assert.deepEqual(parameters().properties.action.enum, ["windows", "tree", "find"]);
+  it("lists every action it implements", () => {
+    assert.deepEqual(parameters().properties.action.enum, ["windows", "tree", "find", "wait", "path"]);
   });
 });
 
@@ -156,5 +156,48 @@ describe("live (skipped outside WSL)", { skip: !canRunLive }, () => {
     const v = await execute({ action: "find", controlType: "Button", maxDepth: 12, maxElements: 400 }, { timeoutMs: 90_000 });
     assert.equal(v.ok, true);
     assert.ok(v.elements.every((e) => e.controlType === "Button"));
+  });
+});
+
+// ── the location actions, added after the first release ─────────────────────
+import { buildWaitScript, buildPathScript, waitForElement, elementPath } from "../lib/uia-locate.js";
+
+describe("location action parameters", () => {
+  it("advertises all five actions", () => {
+    assert.deepEqual(parameters().properties.action.enum, ["windows", "tree", "find", "wait", "path"]);
+  });
+  it("documents the arguments the location actions need", () => {
+    const p = parameters().properties;
+    for (const k of ["expectName", "expectType", "waitMs"]) assert.ok(p[k], k);
+  });
+});
+
+describe("location script building", () => {
+  it("quotes the expected name so a value with an apostrophe cannot break the script", () => {
+    const s = buildWaitScript({ pid: 0, expectName: "it's", expectType: "", maxDepth: 3, maxElements: 10 });
+    assert.ok(s.includes("'it''s'"), "apostrophe must be doubled");
+  });
+  it("only narrows by control type when one is given", () => {
+    const without = buildWaitScript({ pid: 0, expectName: "OK", expectType: "", maxDepth: 3, maxElements: 10 });
+    const with_ = buildWaitScript({ pid: 0, expectName: "OK", expectType: "Button", maxDepth: 3, maxElements: 10 });
+    assert.ok(!without.includes("ControlType.ProgrammaticName -eq 'Button'"));
+    assert.ok(with_.includes("'Button'"));
+  });
+  it("stops the ancestor walk at the Window, not at the first HWND", () => {
+    // A native edit control has its own handle; stopping there returned a
+    // single-entry chain during testing.
+    const s = buildPathScript({ pid: 0, expectName: "x", expectType: "", maxDepth: 3, maxElements: 10 });
+    assert.ok(s.includes("ControlType.Window"), "must test for the control type");
+    assert.ok(!s.includes("if ($el.Current.NativeWindowHandle -ne 0) { break }"), "must not stop on a handle");
+  });
+});
+
+describe("location actions refuse what they cannot do", () => {
+  it("requires expectName", async () => {
+    for (const fn of [waitForElement, elementPath]) {
+      const r = await fn({}, {});
+      assert.equal(r.ok, false);
+      assert.match(r.error, /expectName is required/);
+    }
   });
 });
